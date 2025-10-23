@@ -1,0 +1,165 @@
+#version 430
+
+#define GRIDRESOLUTION 10
+#define M_PI 3.1415926535897932384626433832795
+#define EPSILON 0.01
+#define EIR_DUMPING 0.9
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+ layout(std140) buffer buf {
+    int num_of_particles;
+    float gravity;
+    float dumping;
+    float delta_time;
+    int time_steps;
+    float mass;
+    float gass_constant;
+    float rest_density;
+    float kernel_radius;
+    float viscosity;
+    mat4 world_to_local;
+    mat4 local_to_world;
+    vec4 pos[100000];
+    vec4 vel[100000];
+    vec4 density[100000];
+    vec4 accacceleration[100000];
+        vec4 vertex_data[GRIDRESOLUTION * GRIDRESOLUTION*GRIDRESOLUTION*GRIDRESOLUTION*GRIDRESOLUTION];
+    float density_sample[GRIDRESOLUTION * GRIDRESOLUTION*GRIDRESOLUTION*GRIDRESOLUTION*GRIDRESOLUTION];
+};
+
+float dist_sqrted( vec3 A, vec3 B )
+{
+    vec3 C = A - B;
+    return dot( C, C );
+}
+
+
+float spiky_kernel(vec3 distance){
+    float dst_s = dist_sqrted(distance, vec3(0,0,0));
+    return max(315.0/(64.0 * M_PI * pow(kernel_radius, 9)) * pow(pow(kernel_radius, 2) - dst_s,3), 0);
+}
+
+float pressure_kernel(vec3 distance){
+    return max(15.0/(M_PI * pow(kernel_radius, 6)) * pow(kernel_radius - length(distance), 3),0);
+}
+
+vec3 pressure_kernel_derivative(vec3 distance){
+    float len = length(distance);
+    if(len > kernel_radius)
+        return vec3(0.0, 0.0, 0.0);
+    float val = (-45.0*pow(kernel_radius - len,2))/(M_PI*pow(kernel_radius,6)*len);
+    return vec3(val*distance.x, val*distance.y, val*distance.z);
+}
+
+vec3 pressure_near_kernel_derivatibe(vec3 distance){
+    float len = length(distance);
+    if(len > kernel_radius)
+        return vec3(0.0, 0.0, 0.0);
+    float scale = 45 / (pow(kernel_radius, 6) * M_PI);
+	float v = kernel_radius - len;
+	float val = -v * v * scale;
+    return vec3(distance.x * val, distance.y * val, distance.z * val);
+}
+
+float pressure_kernel_derivative_flt_v2(float distance){
+    float scale = 15 / (pow(kernel_radius, 5) * M_PI);
+	float v = kernel_radius - distance;
+	return -v * scale;
+}
+
+vec3 spiky_kernel_derivative(vec3 distance){
+    float dst_s = dist_sqrted(distance, vec3(0,0,0));
+    float value = 237.0/(8.0*pow(kernel_radius, 9)*M_PI)*pow(-1.0 * kernel_radius + dst_s, 2);
+    return vec3(-1.0 * value * distance.x, -1.0 * value * distance.y, -1.0 * value * distance.z);
+}
+
+float viscosity_laplacian(vec3 distance){
+    float len = length(distance);
+    //if(len > kernel_radius)
+    //    return 0;
+    return (-1.0 * (45.0*(pow(len, 2) - kernel_radius*len)) / (pow(kernel_radius, 6) * M_PI * len));
+    //return (45.0)/(M_PI*pow(kernel_radius, 6)) * (kernel_radius - len);
+}
+
+void main() {
+    int particle_id = int(gl_GlobalInvocationID.x);
+    if(particle_id >= num_of_particles)
+    return;
+
+    vec3 position = pos[particle_id].xyz;
+    vec3 velocity = vel[particle_id].xyz;
+    vec3 acceleration = accacceleration[particle_id].xyz;
+
+    vec3 gravity_force = vec3(0.0, gravity, 0.0);
+
+    float dt = delta_time / time_steps;
+    dt = 1/160.0;
+    for(int i = 0; i < time_steps; i++){
+
+        vec3 pressure_force = vec3(0.0, 0.0, 0.0);
+        vec3 viscosity_force = vec3(0.0, 0.0, 0.0);
+        vec3 surface_force = vec3(0.0, 0.0, 0.0);
+        //vec3 
+        for(int j = 0; j < num_of_particles; j++){
+            vec3 dist = position - pos[j].xyz;
+            float len = length(dist);
+            if(len > kernel_radius) continue;
+            if(j == particle_id) continue;
+            if(len == 0.0){
+                pressure_force -= vec3(1.0, 0.0, 0.0);
+            }else if (density[j].x > EPSILON){
+                pressure_force -= (density[j].y + density[particle_id].y)/(2.0 * density[j].x) * pressure_kernel_derivative(dist);
+                pressure_force -= (density[j].w + density[particle_id].w)/(2.0 * density[j].z) * pressure_near_kernel_derivatibe(dist);
+            }
+
+            if(len != 0.0 && density[j].x > EPSILON){
+                float scalar = viscosity * mass * viscosity_laplacian(dist) / density[j].x;
+                scalar += viscosity * mass * viscosity_laplacian(dist) / density[j].z;
+                viscosity_force += scalar * (vel[j].xyz - vel[particle_id].xyz);
+            }
+
+            //vec3 n = spiky_kernel_derivative(dist)
+        }
+
+        // euler
+        // vec3 old_velocity = velocity;
+        // velocity += (gravity_force + pressure_force + viscosity_force + surface_force) * dt;
+        // position += old_velocity * dt;
+
+        // leap frog
+        vec3 new_acceleration = gravity_force * delta_time / dt + pressure_force + viscosity_force + surface_force;
+        vec3 vel_half_step = velocity + acceleration * dt * 0.5 * dumping;
+        vec3 next_pos = position + vel_half_step * dt * EIR_DUMPING;
+        vec3 next_vel = vel_half_step + new_acceleration * dt * 0.5;
+
+        position = next_pos;
+        velocity = next_vel;
+        acceleration = new_acceleration;
+
+        vec4 local_position = world_to_local * vec4(position.xyz, 1.0);
+        vec4 local_velocity = world_to_local * vec4(velocity.xyz, 0.0);
+        //vec4 local_acceleration = world_to_local * vec4(acceleration.xyz, 1.0);
+        for(int j = 0; j < 3; j++){
+            if (abs(local_position[j]) >= 0.5) {
+                if(local_position[j] >= 0.5){
+                    local_position[j] = 0.5;
+                }else{
+                    local_position[j] = -0.5;
+                }
+
+                local_velocity[j] = local_velocity[j] * -1.0 * dumping;
+                //local_acceleration[j] = local_acceleration[j] * -1.0;
+            }
+        }
+
+        position = (local_to_world * vec4(local_position.xyz, 1.0)).xyz;
+        velocity = (local_to_world * vec4(local_velocity.xyz, 0.0)).xyz;
+        //acceleration = (local_to_world * vec4(local_acceleration.xyz, 1.0)).xyz;
+    }
+
+    pos[particle_id].xyz = position;
+    vel[particle_id].xyz = velocity;
+    accacceleration[particle_id].xyz = acceleration;
+
+    //density[particle_id].x += spiky_kernel(vec3(0.0, 0.0, 0.0));
+}

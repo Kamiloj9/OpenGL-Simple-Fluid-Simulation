@@ -1,0 +1,75 @@
+#version 430
+
+#define GRIDRESOLUTION 10
+#define M_PI 3.1415926535897932384626433832795
+
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+ layout(std140) buffer buf {
+    int num_of_particles;
+    float gravity;
+    float dumping;
+    float delta_time;
+    int time_steps;
+    float mass;
+    float gass_constant;
+    float rest_density;
+    float kernel_radius;
+    float viscosity;
+    mat4 world_to_local;
+    mat4 local_to_world;
+    vec4 pos[100000];
+    vec4 vel[100000];
+    vec4 density[100000];
+    vec4 acceleration[100000];
+    vec4 vertex_data[GRIDRESOLUTION * GRIDRESOLUTION*GRIDRESOLUTION*GRIDRESOLUTION*GRIDRESOLUTION];
+    float density_sample[GRIDRESOLUTION * GRIDRESOLUTION*GRIDRESOLUTION*GRIDRESOLUTION*GRIDRESOLUTION];
+};
+
+float spiky_kernel(float dist){
+    //float dist = length(distance);
+    if(dist > kernel_radius) return 0;
+    return 315.0/(64.0 * M_PI * pow(kernel_radius, 9)) * pow(pow(kernel_radius, 2) - pow(dist, 2),3);
+}
+
+float spiky_kernel_near(float len){
+    if(len > kernel_radius)
+        return 0;
+
+    float scale = 15.0 / (M_PI * pow(kernel_radius, 6));
+	float v = kernel_radius - len;
+	return v * v * v * scale;
+}
+
+void main() {
+    if (gl_GlobalInvocationID.x >= num_of_particles)
+        return;
+        
+
+    int particle_id = int(gl_GlobalInvocationID.x);
+    vec3 position = pos[particle_id].xyz;
+    float new_density = 0.0;
+    float new_near_density = 0.0;
+
+    
+    for(int i = 0; i < num_of_particles; i++){
+        // predict possition for better numerical stability
+        //vec3 particle_position = pos[i].xyz;
+        vec3 particle_position = pos[i].xyz + vel[i].xyz * 1.0/160.0;
+
+        float lenth_2 = dot(position - particle_position, position - particle_position);
+        if(lenth_2 < kernel_radius * kernel_radius){
+
+            float len = sqrt(lenth_2);
+            new_density += spiky_kernel(len);
+            new_near_density += spiky_kernel_near(len);
+        }
+    }
+
+    new_density *= mass;
+    new_near_density *= mass;
+
+    density[particle_id].x = new_density;
+    density[particle_id].y = gass_constant * (new_density - rest_density);
+    density[particle_id].z = new_near_density;
+    density[particle_id].w = gass_constant * (new_density - rest_density);
+}
