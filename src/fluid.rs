@@ -457,7 +457,7 @@ impl Simulation {
     //self.marching_cubes_cpu_time = (self.marching_cubes_cpu_time as f32 / 1_000.0) as u32;
     }
 
-    pub fn present(&self, frame: &mut Frame, draw_parameters: &DrawParameters, proj: [[f32;4];4], view: [[f32;4];4], display: &glium::Display<WindowSurface>, draw_bounds: bool){
+    pub fn present(&self, frame: &mut Frame, draw_parameters: &DrawParameters, proj: [[f32;4];4], view: [[f32;4];4], display: &glium::Display<WindowSurface>, draw_bounds: bool, debug_surface_points: bool, surface_wireframe: bool){
 
         let uniforms = uniform! {
                         //tex: &texture,
@@ -466,7 +466,8 @@ impl Simulation {
                         view: view,
                     };
 
-        let indices = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
+        let indices_tri = glium::index::NoIndices(glium::index::PrimitiveType::TrianglesList);
+        let indices_points = glium::index::NoIndices(glium::index::PrimitiveType::Points);
 
         if !self.draw_cubes{
             self.fluid_mesh_buffer.write(&self.fluid_triangles);
@@ -476,11 +477,20 @@ impl Simulation {
                 //model: model,
                 proj: proj,
                 view: view,
-                data_in: &self.fluid_mesh_uniform
+                buf: &*self.buffer,
+                buf_out: &self.fluid_mesh_uniform
             };
 
-            //let fluid_vertex_buffer = glium::VertexBuffer::dynamic(display, &self.fluid_triangles).unwrap();
-            let _unused =frame.draw(&self.fluid_mesh_buffer, &indices, &self.fluid_program, &uniforms_mc, draw_parameters);
+            let mut params = draw_parameters.clone();
+            if surface_wireframe {
+                params.polygon_mode = PolygonMode::Line;
+            }
+            if debug_surface_points {
+                params.point_size = Some(3.0);
+                let _ = frame.draw(&self.fluid_mesh_buffer, &indices_points, &self.fluid_program, &uniforms_mc, &params);
+            } else {
+                let _ = frame.draw(&self.fluid_mesh_buffer, &indices_tri, &self.fluid_program, &uniforms_mc, &params);
+            }
         }else{
         
 
@@ -500,7 +510,7 @@ impl Simulation {
         //             view: view,
         //         };
 
-        let _ = frame.draw((&self.debug_vertex_buffer, self.debug_particle_buffer.per_instance().unwrap()), &indices, &self.render_program, &uniforms, draw_parameters);
+        let _ = frame.draw((&self.debug_vertex_buffer, self.debug_particle_buffer.per_instance().unwrap()), &indices_tri, &self.render_program, &uniforms, draw_parameters);
         }
 
         if draw_bounds{
@@ -530,7 +540,7 @@ impl Simulation {
                 view: view,
             };
 
-            let _res = frame.draw(&self.debug_vertex_buffer, &indices, &self.bounding_program, &uniforms, &draw_wireframe_params);
+            let _res = frame.draw(&self.debug_vertex_buffer, &indices_tri, &self.bounding_program, &uniforms, &draw_wireframe_params);
         }
     }
     

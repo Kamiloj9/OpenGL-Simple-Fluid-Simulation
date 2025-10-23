@@ -4,7 +4,7 @@ layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
 
 #define GRIDRESOLUTION 15
- layout(std140) buffer buf {
+ layout(std140, row_major) buffer buf {
     int num_of_particles;
     float gravity;
     float dumping;
@@ -318,14 +318,19 @@ void main() {
     int x = int(gl_GlobalInvocationID.x);
     int y = int(gl_GlobalInvocationID.y);
     int z = int(gl_GlobalInvocationID.z);
-	for(int i = 0; i < 8; i++){
-
-		int index = i + x*GRIDRESOLUTION + y *GRIDRESOLUTION * GRIDRESOLUTION + z * GRIDRESOLUTION* GRIDRESOLUTION *GRIDRESOLUTION;
-		vertex_data[index] = vec4(0.0);
-		density_sample[index] = vec4(0.0);
-
-	}
-	return;
+    // clear per-cell buffers (use strides matching flattened layout)
+    int cell_index = x + y * GRIDRESOLUTION + z * GRIDRESOLUTION * GRIDRESOLUTION;
+    // clear 8 vertices per cell in the first 8 slots of the last dimension
+    for (int i = 0; i < 8; i++) {
+        int v_index = i + cell_index * GRIDRESOLUTION; // last stride uses GRIDRESOLUTION
+        vertex_data[v_index] = vec4(0.0);
+        density_sample[v_index] = vec4(0.0);
+    }
+    // clear 15 triangle slots per cell for out_triangles
+    int tri_base = cell_index * 15;
+    for (int i = 0; i < 15; i++) {
+        out_triangles[tri_base + i] = vec4(0.0);
+    }
 
     float step_size = 1.0 / (float(GRIDRESOLUTION));
 
@@ -336,15 +341,16 @@ void main() {
     float z_min = -0.5 + float(z) * step_size;
     float z_max = z_min + step_size;
 
+    // Work in local coordinates here; transform to world in vertex shader.
     vec4 verticies[] = vec4[](
-        local_to_world * vec4(x_min, y_min, z_min, 1.0),
-        local_to_world * vec4(x_min, y_min, z_max, 1.0),
-        local_to_world * vec4(x_max, y_min, z_max, 1.0),
-        local_to_world * vec4(x_max, y_min, z_min, 1.0),
-        local_to_world * vec4(x_min, y_max, z_min, 1.0),
-        local_to_world * vec4(x_min, y_max, z_max, 1.0),
-        local_to_world * vec4(x_max, y_max, z_max, 1.0),
-        local_to_world * vec4(x_max, y_max, z_min, 1.0)
+        vec4(x_min, y_min, z_min, 1.0),
+        vec4(x_min, y_min, z_max, 1.0),
+        vec4(x_max, y_min, z_max, 1.0),
+        vec4(x_max, y_min, z_min, 1.0),
+        vec4(x_min, y_max, z_min, 1.0),
+        vec4(x_min, y_max, z_max, 1.0),
+        vec4(x_max, y_max, z_max, 1.0),
+        vec4(x_max, y_max, z_min, 1.0)
     );
 
     for(int i = 0; i < 8; i++){
@@ -352,36 +358,37 @@ void main() {
         vec3 vert_pos = verticies[i].xyz;
 
         for(int j = 0; j < num_of_particles; j++){
-            vec3 particle_position = pos[j].xyz;
-            new_density += mass * spiky_kernel(particle_position - vert_pos);
+            // Transform particle world position into local space
+            vec3 particle_world = pos[j].xyz;
+            vec3 particle_local = (transpose(world_to_local) * vec4(particle_world, 1.0)).xyz;
+            new_density += mass * spiky_kernel(particle_local - vert_pos);
         }
 
-        int index = i + x*GRIDRESOLUTION + y *GRIDRESOLUTION * GRIDRESOLUTION + z * GRIDRESOLUTION* GRIDRESOLUTION *GRIDRESOLUTION;
-
-        vertex_data[index] = verticies[i];
+        int v_index = i + cell_index * GRIDRESOLUTION;
+        vertex_data[v_index] = verticies[i];
         if(new_density != 0.0)
-            density_sample[index].x = new_density / (gass_constant * (new_density - rest_density));
+            density_sample[v_index].x = new_density / (gass_constant * (new_density - rest_density));
         else
-            density_sample[index].x = 0.0;
+            density_sample[v_index].x = 0.0;
     }
 
     // get triangulation index
 
     int t_index = 0;
     for(int i = 0; i < 8; i++){
-        int index = i + x*GRIDRESOLUTION + y *GRIDRESOLUTION * GRIDRESOLUTION + z * GRIDRESOLUTION* GRIDRESOLUTION *GRIDRESOLUTION;
-        if(density_sample[index].x > iso_level)
+        int v_index = i + cell_index * GRIDRESOLUTION;
+        if(density_sample[v_index].x > iso_level)
             t_index |= 1 << i;
     }
     int tranfulation[15] = tConnectionTable[t_index];
 
     for(int i = 0; i < 15; i++){
         int trangulation_index = tranfulation[i];
-		int index = i + x*GRIDRESOLUTION + y *GRIDRESOLUTION * GRIDRESOLUTION + z * GRIDRESOLUTION* GRIDRESOLUTION *GRIDRESOLUTION;
+        int o_index = tri_base + i;
 
         if (trangulation_index < 0){
             //break;
-			out_triangles[index] = vec4(0.0, 0.0, 0.0, 0.0);
+			out_triangles[o_index] = vec4(0.0, 0.0, 0.0, 0.0);
 			continue;
 		}
 
@@ -390,8 +397,8 @@ void main() {
         vec4 x0 = verticies[point_ind[0]];
         vec4 x1 = verticies[point_ind[1]];
 
-        out_triangles[index] = (x0 + x1) * 0.5;
-        out_triangles[index].w = 1337.0;
+        out_triangles[o_index] = (x0 + x1) * 0.5;
+        out_triangles[o_index].w = 1337.0;
     }
 
     // sample dansity at given point (x,y,z) and store it in 1D array
