@@ -126,8 +126,10 @@ fn main() {
     let mut draw_cubes = false;
 
     let mut iso_level = 1.0f32;
-    let mut debug_surface_points = true;
+    let mut debug_surface_points = false;
     let mut surface_wireframe = false;
+    let mut surface_color: [f32;3] = [0.0, 0.0, 0.8];
+    let mut surface_alpha: f32 = 0.5;
 
     let spaw_particle_location = [5.0 , 0.0, 5.0f32];
     simulation.add_particle(spaw_particle_location);
@@ -167,8 +169,18 @@ fn main() {
                 ui.checkbox(&mut draw_cubes, "Draw cubes");
                 ui.label(format!("Draw mode: {}", if draw_cubes { "Cubes" } else { "Surface" }));
                 if !draw_cubes {
-                    ui.checkbox(&mut debug_surface_points, "Debug: surface points");
-                    ui.checkbox(&mut surface_wireframe, "Surface wireframe");
+                    ui.separator();
+                    ui.heading("Surface");
+                    ui.checkbox(&mut debug_surface_points, "Show points (debug)");
+                    ui.checkbox(&mut surface_wireframe, "Wireframe");
+                    ui.horizontal(|ui| {
+                        ui.label("Color");
+                        egui::color_picker::color_edit_button_rgb(ui, &mut surface_color);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Alpha");
+                        ui.add(egui::Slider::new(&mut surface_alpha, 0.0..=1.0));
+                    });
                 }
 
                 
@@ -396,7 +408,7 @@ fn main() {
                 frame.clear_color_and_depth((clear_color[0], clear_color[1], clear_color[2], 1.0), 1.0);
                 
                 frame.draw(&teapot_vertex_buffer, &indices, &program, &uniforms, &params).unwrap();
-                simulation.present(&mut frame, &params, math::mat4_to_arr(&proj), view, &display, draw_bounds, debug_surface_points, surface_wireframe);
+                simulation.present(&mut frame, &params, math::mat4_to_arr(&proj), view, &display, draw_bounds, debug_surface_points, surface_wireframe, surface_color, surface_alpha);
                 
                 egui_glium.paint(&display, &mut frame);
 

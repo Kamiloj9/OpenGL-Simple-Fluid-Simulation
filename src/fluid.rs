@@ -457,7 +457,7 @@ impl Simulation {
     //self.marching_cubes_cpu_time = (self.marching_cubes_cpu_time as f32 / 1_000.0) as u32;
     }
 
-    pub fn present(&self, frame: &mut Frame, draw_parameters: &DrawParameters, proj: [[f32;4];4], view: [[f32;4];4], display: &glium::Display<WindowSurface>, draw_bounds: bool, debug_surface_points: bool, surface_wireframe: bool){
+    pub fn present(&self, frame: &mut Frame, draw_parameters: &DrawParameters, proj: [[f32;4];4], view: [[f32;4];4], display: &glium::Display<WindowSurface>, draw_bounds: bool, debug_surface_points: bool, surface_wireframe: bool, surface_color: [f32;3], surface_alpha: f32){
 
         let uniforms = uniform! {
                         //tex: &texture,
@@ -472,19 +472,23 @@ impl Simulation {
         if !self.draw_cubes{
             self.fluid_mesh_buffer.write(&self.fluid_triangles);
 
+            let color_vec = [surface_color[0], surface_color[1], surface_color[2], surface_alpha];
             let uniforms_mc = uniform! {
                 //tex: &texture,
                 //model: model,
                 proj: proj,
                 view: view,
                 buf: &*self.buffer,
-                buf_out: &self.fluid_mesh_uniform
+                buf_out: &self.fluid_mesh_uniform,
+                color: color_vec
             };
 
             let mut params = draw_parameters.clone();
             if surface_wireframe {
                 params.polygon_mode = PolygonMode::Line;
             }
+            // enable alpha blending for surface
+            params.blend = glium::Blend::alpha_blending();
             if debug_surface_points {
                 params.point_size = Some(3.0);
                 let _ = frame.draw(&self.fluid_mesh_buffer, &indices_points, &self.fluid_program, &uniforms_mc, &params);
