@@ -9,12 +9,14 @@ cubes or an extracted surface via a marching‑cubes compute shader.
 - UI: `egui`
 - Math: `nalgebra_glm`
 - Surface extraction: GLSL compute shader (OpenGL 4.3+)
+  with a CPU compatibility fallback for systems limited to OpenGL 4.1
 
 Requirements
 ------------
 
 - Rust (stable)
-- GPU/driver with OpenGL 4.3 or newer (for compute shaders)
+- GPU/driver with OpenGL 4.3 or newer for the full GPU compute path
+- OpenGL 4.1 systems such as Apple silicon Macs run a CPU compatibility path
 
 Build & Run
 -----------
@@ -43,7 +45,7 @@ UI (left panel)
 Notes
 -----
 
-- Surface mode requires an OpenGL 4.3+ capable GPU.
+- On Apple silicon/macOS, the app falls back to CPU simulation and CPU marching cubes
+  because macOS OpenGL stops at 4.1 and does not expose compute shaders.
 - If surface is invisible, try adjusting `iso level` and check
   `Draw bounds` to verify the simulation domain.
-

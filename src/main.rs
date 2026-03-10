@@ -63,6 +63,7 @@ fn main() {
 
 
     println!("Render device: {}", display.get_opengl_renderer_string());
+    println!("OpenGL version: {}", display.get_opengl_version_string());
 
     let image = image::load(std::io::Cursor::new(&include_bytes!("../res/ironman.png")),
         image::ImageFormat::Png).unwrap().to_rgba8();
@@ -142,6 +143,11 @@ fn main() {
                 ui.heading("Fluid Simulation");
                 ui.label(format!("FPS: {}", fps as u32));
                 ui.label(format!("particle count {}", simulation.particles.len()));
+                if simulation.compute_supported() {
+                    ui.label("Backend: GPU compute");
+                } else {
+                    ui.label("Backend: CPU compatibility (Apple/OpenGL 4.1)");
+                }
                 ui.horizontal(|ui| {
                     ui.label("kernel radius");
                     ui.add(egui::Slider::new(&mut kernel_radius, 0.01..=3.0));
